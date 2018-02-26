@@ -18,6 +18,8 @@ TagManager:
   - gate
   - posLeft
   - posRight
+  - waiter
+  - posCenter
   layers:
   - Default
   - TransparentFX

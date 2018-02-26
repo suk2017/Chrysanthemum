@@ -10,6 +10,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 public class InnManager : MonoBehaviour
 {
@@ -29,16 +30,17 @@ public class InnManager : MonoBehaviour
     /**********跑堂**********/
     /// <summary>点餐点</summary>
     private List<Transform> order;
-    /// <summary>取餐点</summary>
+    /// <summary>取餐点 厨房</summary>
     private Transform[] meal;
-    /// <summary>送餐点</summary>
+    /// <summary>送餐点 客人</summary>
     private List<Transform> treat;
-    /// <summary>碗筷点</summary>
+    /// <summary>碗筷点 客人</summary>
     private List<Transform> dishes;
-    /// <summary>收餐点</summary>
+    /// <summary>收餐点 厨房</summary>
     private Transform[] clear;
 
-
+    /// <summary>收餐点是否可用</summary>
+    private bool[] b_meal;
     /**********迎宾**********/
     /// <summary>迎宾点</summary>
     private Transform[] usher;
@@ -48,18 +50,23 @@ public class InnManager : MonoBehaviour
     /**********厨师**********/
     /// <summary>烹调点</summary>
     private Transform[] cook;
+    /// <summary>制作好的食物</summary>
+    private Transform[] food;
 
+    private bool[] b_cook;
     /**********账房**********/
     /// <summary>账房点</summary>
     private Transform[] book;
 
     /*********其它**********/
-    /// <summary>尚未点餐</summary>
-    private List<Order> m_FreshOrders;
-    /// <summary>已创建订单</summary>
-    private List<Order> m_Orders;
-    /// <summary>已完成订单</summary>
-    private List<Order> m_FinishedOrders;
+    /// <summary>厨师可处理的请求</summary>
+    private List<Order> m_CookOrders;
+    /// <summary>侍者可处理的请求</summary>
+    private List<Order> m_WaiterOrders;
+    /// <summary>账房可处理的请求</summary>
+    private List<Order> m_CheckOrders;
+    /// <summary>迎宾可处理的订单</summary>
+    private List<Order> m_UsherOrders;
 
     /// <summary>所有可用的侍者</summary>
     private Waiter[] m_WaiterList
@@ -68,28 +75,21 @@ public class InnManager : MonoBehaviour
     //private Usher[] m_UsherList;
     //private Accountant[] m_AccountantList;
 
-    public static InnManager current
-    {
-        get
-        {
-            if (m_current == null)
-            {
-                m_current = GameObject.FindObjectOfType<InnManager>();
-            }
-            return m_current;
-        }
-    }
-    private static InnManager m_current;
+    public static InnManager current;
 
+
+    public static int OrderAvailableCount = 0;
 
     /***********内部方法***********/
-
+    #region
 
 
     private void Start()
     {
-        StartCoroutine(WaiterService());
+        current = GetComponent<InnManager>();//全场只绑定一个InnManager
         _ResetValue();
+        StartCoroutine(WaiterService());
+        StartCoroutine(CookService());
     }
 
     /// <summary>
@@ -97,24 +97,29 @@ public class InnManager : MonoBehaviour
     /// </summary>
     private IEnumerator WaiterService()
     {
-        if (m_Orders == null)
+        if (m_WaiterOrders == null)
         {
-            m_Orders = new List<Order>();
+            m_WaiterOrders = new List<Order>();
         }
         while (true)
         {
-            if (m_Orders.Count > 0)
+            /* 若还有可处理的订单
+             * 不可处理的订单通过等待成为可处理的*/
+            if (OrderAvailableCount > 0)
             {
-                Waiter w = _GetFreeWaiter();
-                if (w != null)
+                Waiter w = GetFreeWaiter();//获取空闲的侍者
+                if (w != null)//如果还有空闲的
                 {
-                    switch (m_Orders[0].status)
+                    for (int i = 0; i < m_WaiterOrders.Count; ++i)
                     {
-                        case 0: StartCoroutine(w._Order(m_Orders[0], "seat", _Order)); break;
-                        case 1: StartCoroutine(w._Order(m_Orders[0], "meal", _TakeMeal)); break;
-                        case 2: StartCoroutine(w._Order(m_Orders[0], "treat", _Deliver)); break;
-                        case 3: StartCoroutine(w._Order(m_Orders[0], "dishes", _ClearTable)); break;
-                        case 4: StartCoroutine(w._Order(m_Orders[0], "clear", _PutAway)); break;
+                        if (m_WaiterOrders[i].available)
+                        {
+                            //StartCoroutine(w._Order(m_WaiterOrders[i]));
+
+                            m_WaiterOrders.RemoveAt(i);
+                            OrderAvailableCount -= 1;
+                            break;
+                        }
                     }
                 }
             }
@@ -125,84 +130,146 @@ public class InnManager : MonoBehaviour
     /// <summary>
     /// 等待点餐 → 等待上餐
     /// </summary>
-    public void _Order(Order o)
+    private void _Order(Order o)
     {
-        if (m_Orders.Remove(o))
-        {
-            print("删除成功");
-        }
-        o.status += 1;
-        m_Orders.Add(o);
+        //厨师生产菜品
+        StartCoroutine(MakeMeal());
     }
 
     /// <summary>
-    /// 取餐
+    /// 取餐 args0为Order args1为Waiter自己
     /// </summary>
-    public void _TakeMeal(Order o)
+    private object _TakeMeal(object[] o)
     {
-        m_Orders.Remove(o);
-        o.status += 1;
-        m_Orders.Add(o);
+        Order _o = o[0] as Order;
+        Waiter _w = o[1] as Waiter;
+
+        //取餐
+        food[_o.index].transform.parent = _w.transform;//Waiter持有该餐食
+        food[_o.index].transform.position = _w.transform.position + _w.transform.forward * 0.5f;//餐食在Waiter的正前方
+
+        //送餐（这个与取餐要连续执行 无需通过请求链发送Order）
+        _w._Order(new Order()
+        {
+            customer = _o.customer,
+            
+        });
+        _w._Order(_o.customer.transform, _Deliver);
+
+        return null;
     }
 
     /// <summary>
     /// 送餐
     /// </summary>
-    public void _Deliver(Order o)
+    private object _Deliver(object o)
     {
-        m_Orders.Remove(o);
-        o.status += 1;
-        m_Orders.Add(o);
+        Order _o = o as Order;
+        //_o.customer._Eat(new Order()
+        //{
+        //});
+
+        return null;
     }
 
-    public void _Clear(Order o)
+    /// <summary>
+    /// 收拾桌子
+    /// </summary>
+    /// <param name="o"></param>
+    private object _Clear(object o)
     {
-        m_Orders.Remove(o);
-        o.status += 1;
-        m_Orders.Add(o);
+        return null;
     }
 
-    public void _ClearTable(Order o)
+    /// <summary>
+    /// 收拾碗筷
+    /// </summary>
+    /// <param name="o"></param>
+    private object _ClearTable(object o)
     {
-        m_Orders.Remove(o);
-        o.status += 1;
-        m_Orders.Add(o);
+        return null;
     }
 
-    public void _PutAway(Order o)
+    /// <summary>
+    /// 送洗碗筷
+    /// </summary>
+    /// <param name="o"></param>
+    private object _PutAway(object o)
     {
-        m_Orders.Remove(o);
+        return null;
+    }
+
+    /******* *******/
+
+    /// <summary>
+    /// 做饭
+    /// </summary>
+    /// <returns></returns>
+    private IEnumerator MakeMeal()
+    {
+        //获取可使用的出餐口 这里的厨师默认空闲
+        int index = GetFreeMeal();
+        while (index < 0)
+        {
+            yield return new WaitForEndOfFrame();
+            index = GetFreeMeal();
+        }
+        b_meal[index] = false;
+
+        //cook播放动画 TODO其实并不需要在同一个餐桌 因为一般只有一个后厨
+        print("制餐");
+
+
+        //出菜
+        Instantiate(Meal.SuSanXian.model, meal[index].position, Quaternion.identity);
+        print("出餐");
+
+        //上单
+        m_WaiterOrders.Add(new Order()
+        {
+            available = true,
+            tag = "meal",
+            trf = meal[index],
+            fun = _TakeMeal
+        });
     }
 
     /// <summary>
     /// 每次开始正式营业前调用一次
     /// </summary>
-    public void _ResetValue()
+    private void _ResetValue()
     {
 
 
         /**********顾客**********/
         GameObject[] temp = GameObject.FindGameObjectsWithTag("seat");
-        if (seats == null || seats.Length != temp.Length)
+        if (seats == null)
         {
             seats = new Transform[temp.Length];
-            for (int i = 0; i < seats.Length; ++i)
-            {
-                seats[i] = temp[i].transform;
-            }
         }
+        for (int i = 0; i < seats.Length; ++i)
+        {
+            seats[i] = temp[i].transform;
+        }
+        print("席位：" + seats.Length);
 
         temp = GameObject.FindGameObjectsWithTag("check");
-        if (check == null || check.Length != temp.Length)
+        if (check == null)
         {
             check = new Transform[temp.Length];
-            for (int i = 0; i < check.Length; ++i)
-            {
-                check[i] = temp[i].transform;
-            }
         }
+        for (int i = 0; i < check.Length; ++i)
+        {
+            check[i] = temp[i].transform;
+        }
+        print("结账点：" + check.Length);
 
         b_seats = new bool[seats.Length];
+        for (int i = 0; i < b_seats.Length; ++i)
+        {
+            b_seats[i] = true;
+        }
+
 
         /**********跑堂**********/
         if (order == null)
@@ -211,14 +278,15 @@ public class InnManager : MonoBehaviour
         }
 
         temp = GameObject.FindGameObjectsWithTag("meal");
-        if (meal == null || meal.Length != temp.Length)
+        if (meal == null)
         {
             meal = new Transform[temp.Length];
-            for (int i = 0; i < meal.Length; ++i)
-            {
-                meal[i] = temp[i].transform;
-            }
         }
+        for (int i = 0; i < meal.Length; ++i)
+        {
+            meal[i] = temp[i].transform;
+        }
+        print("取餐点：" + meal.Length);
 
         if (treat == null)
         {
@@ -231,72 +299,94 @@ public class InnManager : MonoBehaviour
         }
 
         temp = GameObject.FindGameObjectsWithTag("clear");
-        if (clear == null || clear.Length != temp.Length)
+        if (clear == null)
         {
             clear = new Transform[temp.Length];
-            for (int i = 0; i < clear.Length; ++i)
-            {
-                clear[i] = temp[i].transform;
-            }
         }
+        for (int i = 0; i < clear.Length; ++i)
+        {
+            clear[i] = temp[i].transform;
+        }
+        print("收餐点：" + clear.Length);
 
 
-
+        if (b_meal == null)//取餐点是否可用
+        {
+            b_meal = new bool[meal.Length];
+        }
+        for (int i = 0; i < b_meal.Length; ++i)
+        {
+            b_meal[i] = true;
+        }
         /**********迎宾**********/
         temp = GameObject.FindGameObjectsWithTag("usher");
-        if (usher == null || usher.Length != temp.Length)
+        if (usher == null)
         {
             usher = new Transform[temp.Length];
-            for (int i = 0; i < usher.Length; ++i)
-            {
-                usher[i] = temp[i].transform;
-            }
         }
+        for (int i = 0; i < usher.Length; ++i)
+        {
+            usher[i] = temp[i].transform;
+        }
+        print("迎宾点：" + usher.Length);
 
         temp = GameObject.FindGameObjectsWithTag("stable");
-        if (stable == null || stable.Length != temp.Length)
+        if (stable == null)
         {
             stable = new Transform[temp.Length];
-            for (int i = 0; i < stable.Length; ++i)
-            {
-                stable[i] = temp[i].transform;
-            }
         }
-
+        for (int i = 0; i < stable.Length; ++i)
+        {
+            stable[i] = temp[i].transform;
+        }
+        print("驻马点：" + stable.Length);
 
         /**********厨师**********/
         temp = GameObject.FindGameObjectsWithTag("cook");
-        if (cook == null || cook.Length != temp.Length)
+        if (cook == null)
         {
             cook = new Transform[temp.Length];
-            for (int i = 0; i < cook.Length; ++i)
-            {
-                cook[i] = temp[i].transform;
-            }
         }
+        for (int i = 0; i < cook.Length; ++i)
+        {
+            cook[i] = temp[i].transform;
+        }
+        print("厨师点：" + cook.Length);
 
+        //food = null;
 
+        b_cook = new bool[cook.Length];
+        for (int i = 0; i < b_cook.Length; ++i)
+        {
+            b_cook[i] = true;
+        }
         /**********账房**********/
         temp = GameObject.FindGameObjectsWithTag("book");
-        if (book == null || book.Length != temp.Length)
+        if (book == null)
         {
             book = new Transform[temp.Length];
-            for (int i = 0; i < book.Length; ++i)
-            {
-                book[i] = temp[i].transform;
-            }
         }
-
+        for (int i = 0; i < book.Length; ++i)
+        {
+            book[i] = temp[i].transform;
+        }
+        print("账房点：" + book.Length);
 
         /*********其它**********/
 
-        m_WaiterList = new Waiter[1];
+        temp = GameObject.FindGameObjectsWithTag("waiter");
+        m_WaiterList = new Waiter[temp.Length];
+        for (int i = 0; i < temp.Length; ++i)
+        {
+            m_WaiterList[i] = temp[i].GetComponent<Waiter>();
+        }
+
     }
 
     /// <summary>
     /// 获取空闲的侍者
     /// </summary>
-    public Waiter _GetFreeWaiter()
+    private Waiter GetFreeWaiter()
     {
         for (int i = 0; i < m_WaiterList.Length; ++i)
         {
@@ -308,6 +398,25 @@ public class InnManager : MonoBehaviour
         return null;
     }
 
+    /// <summary>
+    /// 获取放食物的地方 但是如果没有 那么就返回-1
+    /// </summary>
+    /// <returns></returns>
+    private int GetFreeMeal()
+    {
+        //TODO 需要和厨师联系起来
+        for (int i = 0; i < b_meal.Length; ++i)
+        {
+            if (b_meal[i])
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+
+    #endregion
 
     /**********顾客**********/
     /// <summary>
@@ -315,16 +424,22 @@ public class InnManager : MonoBehaviour
     /// </summary>
     public bool _GetPos(out Vector3 pos)
     {
-        for (int i = 0; i < 10; ++i)//连续十次判断是否有位置 都没有就离开
+        for (int i = 0; i < 3; ++i)//连续三次判断是否有位置 都没有就离开
         {
             if (b_seats == null)
             {
                 b_seats = new bool[seats.Length];
+                for (int j = 0; j < b_seats.Length; ++j)
+                {
+                    b_seats[i] = true;
+                }
+                print("b_seats为空 已赋值");
             }
             int value = (int)(Random.value * b_seats.Length);
             if (b_seats[value])
             {
-                pos = seats[i].position;
+                pos = seats[value].position;
+                b_seats[value] = false;
                 return true;
             }
         }
@@ -337,11 +452,127 @@ public class InnManager : MonoBehaviour
     /// </summary>
     public void _GetService(Order o)
     {
-        m_FreshOrders.Add(o);
+        m_WaiterOrders.Add(o);
+        OrderAvailableCount += 1;
+    }
+
+    public void _AddWaiterOrder(Order o)
+    {
+        m_WaiterOrders.Add(o);
+        OrderAvailableCount += 1;
+    }
+
+    public void _AddCookOrder(Order o)
+    {
+        m_CookOrders.Add(o);
 
     }
 
+    /// <summary>
+    /// 去结账
+    /// </summary>
+    public bool _GoToCheckOut(NavMeshAgent customer)
+    {
+        int min = int.MaxValue;
+        int index = 0;
+        for (int i = 0; i < check.Length; ++i)//选取最小值 使得各结账台排队较为均衡
+        {
+            int value = check[i].GetComponent<QueueHead>().count;
+            if (value < min)
+            {
+                min = value;
+                index = i;
+            }
+        }
+        check[index].GetComponent<QueueHead>()._GetInQueue(customer);//去排队 寻路又QueueHead类控制
+        return true;
+    }
 
+
+    /*******厨师*******/
+    public IEnumerator CookService()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(0.05f);
+            //检查订单是否还有需要处理者
+            if (m_CookOrders.Count <= 0)
+            {
+                continue;//订单列表已空
+            }
+            //检查出餐口是否有空余位置
+            int index = GetFreeMeal();
+            if (index < 0)
+            {
+                Debug.LogWarning("出餐口已满");
+                continue;
+            }
+            //检查是否有可用厨师
+            int i;
+            for (i = 0; i < cook.Length; ++i)
+            {
+                /*******正式处理*******/
+                if (b_cook[i])
+                {
+                    print("制餐");
+                    //发送菜品 并回调TakeMeal方法
+                    {
+                        yield return new WaitForSeconds(2f);//模拟制餐动画
+                        _Meal(index, m_CookOrders[0]);//模拟回调方法
+                    }
+                    m_CookOrders.RemoveAt(0);//移除过期订单
+                }
+            }
+            if (i >= cook.Length)//正常应该是相等
+            {
+                print("没有空闲厨师");
+            }
+            else
+            {
+                print("开始制菜");
+            }
+
+        }
+    }
+    /// <summary>
+    /// 制餐结束 立刻出餐 立刻通知Waiter取餐
+    /// </summary>
+    public void _Meal(int index, Order o)
+    {
+        //出餐
+        Instantiate(o.meal[0].model, meal[index].position, Quaternion.identity);
+        print("出餐");
+
+        //上单
+        m_WaiterOrders.Add(new Order()
+        {
+            customer = o.customer,
+            available = true,
+            tag = "meal",
+            trf = meal[index],
+            fun = _TakeMeal,
+            index = index,
+        });
+    }
+
+    /// <summary>
+    /// 返回最短距离的收餐点
+    /// </summary>
+    public Vector3 _GetRecyclePos(Vector3 Pos)
+    {
+        int index = 0;
+        float minLength = float.MaxValue;
+        for(int i = 0; i < meal.Length; ++i)
+        {
+            float length = Vector3.SqrMagnitude(Pos - meal[i].position);
+            if(minLength > length)
+            {
+                minLength = length;
+                index = i;
+            }
+        }
+        return meal[index].position;
+    }
 }
 
 

@@ -14,6 +14,8 @@ public class Meal
     public Dictionary<int, int> ingredients;//食材
     public float prograss;//研发进度 （大于1可以制作 之后精益求精）
     public string describe;//描述
+    public GameObject model;//实体模型
+    public Texture2D texture;//展示图片
 
     /******************************/
     public static Meal ShuiZhuRouPian
@@ -28,7 +30,8 @@ public class Meal
                 tag1 = MealTag1.HunCai,
                 tag2 = MealTag2.MaLa & MealTag2.Xian,
                 prograss = 1,
-                describe = "红彤彤，香喷喷，来试试吧。"
+                describe = "红彤彤，香喷喷，来试试吧。",
+                model = (GameObject)Resources.Load("ShuiZhuRouPian")
             };
             temp.ingredients = new Dictionary<int, int>();
             temp.ingredients.Add(Ingredient.ShaoRou, 2);
@@ -48,7 +51,8 @@ public class Meal
                 tag1 = MealTag1.SuCai,
                 tag2 = MealTag2.Xian,
                 prograss = 1,
-                describe = "焦香四溢，香鲜软糯，比肉还好吃哦。"
+                describe = "焦香四溢，香鲜软糯，比肉还好吃哦。",
+                model = (GameObject)Resources.Load("SuSanXian")
             };
             temp.ingredients = new Dictionary<int, int>();
             temp.ingredients.Add(Ingredient.QingCai, 3);
@@ -62,9 +66,19 @@ public class Meal
         SuSanXian
     };
 
-    public static Meal getRandomMeal()
+    public static Meal GetRandomMeal()
     {
         return meals[(int)(Random.value * meals.Length)];
+    }
+
+    public static Meal GetMeal(string name)
+    {
+        switch (name)
+        {
+            case "ShuiZhuRouPian": return ShuiZhuRouPian;
+            case "SuSanXian": return SuSanXian;
+        }
+        return null;
     }
 
     /******************************/
@@ -243,8 +257,21 @@ public class Meal
 
 public class Order
 {
-    public Vector3 pos;//小二要到的位置
-    public Customer des;//小二要交互的顾客
+    public Customer customer;
+    public Transform MealPos;
+    /*******Cook*******/
     public Meal[] meal;//具体的食物
-    public int status;//0 -点餐→ 1 -制作→ 2 -送餐→3 -结账→4
+    public int index;//食物的位置
+
+    /*******Waiter*******/
+    public bool available = true;//是否开始执行
+    public string tag = "seat";
+
+    public Transform trf;
+    public callback fun;
+
+
+    /*******类型*******/
+    public delegate object callback(params object[] obj);
 }
+
